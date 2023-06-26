@@ -5,7 +5,7 @@ use esp_idf_hal::{
     gpio::PinDriver,
     prelude::Peripherals,
 };
-use esp_idf_sys as _; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
+use esp_idf_sys::{self as _, esp_deep_sleep}; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
 use log::{error, info, warn};
 use one_wire_bus::{OneWire, OneWireError};
 use serde::Serialize;
@@ -22,15 +22,20 @@ fn main() {
     let driver = PinDriver::input_output_od(peripherals.pins.gpio3).unwrap();
     let mut one_wire_bus = OneWire::new(driver).unwrap();
 
-    loop {
-        // Temperature measurement on one-wire-bus
-        match measure_temperature(&mut one_wire_bus) {
-            Ok(measurement) => send(&measurement).unwrap(),
-            Err(MeasurementError::NoDeviceFound) => warn!("No device found on one-wire-bus"),
-            Err(err) => error!("{:?}", err),
-        }
+    // Temperature measurement on one-wire-bus
+    match measure_temperature(&mut one_wire_bus) {
+        Ok(measurement) => send(&measurement).unwrap(),
+        Err(MeasurementError::NoDeviceFound) => warn!("No device found on one-wire-bus"),
+        Err(err) => error!("{:?}", err),
+    }
 
-        FreeRtos::delay_ms(10_000); // Wait until the data is sent
+    deep_sleep(9);
+}
+
+fn deep_sleep(seconds: u64) -> ! {
+    info!("Powering down for {} seconds", seconds);
+    unsafe {
+        esp_deep_sleep(seconds * 1_000_000);
     }
 }
 
