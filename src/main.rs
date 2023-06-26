@@ -1,3 +1,5 @@
+use std::net::UdpSocket;
+
 use ds18b20::{Ds18b20, Resolution};
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 use esp_idf_hal::{
@@ -9,6 +11,9 @@ use esp_idf_sys::{self as _, esp_deep_sleep}; // If using the `binstart` feature
 use log::{error, info, warn};
 use one_wire_bus::{OneWire, OneWireError};
 use serde::Serialize;
+
+mod wifi;
+use wifi::Wifi;
 
 fn main() {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -22,12 +27,19 @@ fn main() {
     let driver = PinDriver::input_output_od(peripherals.pins.gpio3).unwrap();
     let mut one_wire_bus = OneWire::new(driver).unwrap();
 
+    let mut wifi = Wifi::init(peripherals.modem);
+    Wifi::start(&mut wifi);
+    FreeRtos::delay_ms(2000); // Wait for the DHCP server to deliver a lease
+
     // Temperature measurement on one-wire-bus
     match measure_temperature(&mut one_wire_bus) {
         Ok(measurement) => send(&measurement).unwrap(),
         Err(MeasurementError::NoDeviceFound) => warn!("No device found on one-wire-bus"),
         Err(err) => error!("{:?}", err),
     }
+
+    FreeRtos::delay_ms(2000); // Wait until the data is sent
+    wifi.stop().expect("Failed to stop wifi");
 
     deep_sleep(9);
 }
@@ -40,8 +52,11 @@ fn deep_sleep(seconds: u64) -> ! {
 }
 
 fn send(measurement: &Measurement) -> std::io::Result<()> {
+    let socket = UdpSocket::bind("0.0.0.0:7331")?;
     let message = serde_json::to_string_pretty(&measurement)?;
     info!("{}", message);
+    socket.connect(format!("{}:7331", env!("SERVER_IP")))?;
+    socket.send(message.as_bytes())?;
     Ok(())
 }
 
